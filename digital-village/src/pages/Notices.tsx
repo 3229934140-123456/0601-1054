@@ -34,7 +34,7 @@ export default function Notices() {
   const [formTitle, setFormTitle] = useState('')
   const [formType, setFormType] = useState('')
   const [formContent, setFormContent] = useState('')
-  const [formTargetGroups, setFormTargetGroups] = useState<string[]>(villageGroups.map(g => g.id))
+  const [formTargetGroups, setFormTargetGroups] = useState<string[]>([])
   const [formIsImportant, setFormIsImportant] = useState(false)
   const [formPublisher, setFormPublisher] = useState('村委会')
 
@@ -288,7 +288,7 @@ export default function Notices() {
     setFormTitle('')
     setFormType('')
     setFormContent('')
-    setFormTargetGroups(villageGroups.map(g => g.id))
+    setFormTargetGroups([])
     setFormIsImportant(false)
     setFormPublisher('村委会')
   }
@@ -298,11 +298,16 @@ export default function Notices() {
       alert('请填写必填项')
       return
     }
+    if (formTargetGroups.length === 0) {
+      alert('请选择发送范围')
+      return
+    }
 
     const targetHouseholds = households.filter(h => formTargetGroups.includes(h.groupId))
-    const receipts: NoticeReceipt[] = targetHouseholds.map(h => ({
-      id: `r${Date.now()}_${h.id}`,
-      noticeId: '',
+    const newNoticeId = `n${Date.now()}`
+    const receipts: NoticeReceipt[] = targetHouseholds.map((h, i) => ({
+      id: `r${Date.now()}${i}`,
+      noticeId: newNoticeId,
       householdId: h.id,
       householdName: h.householder,
       isRead: false,
@@ -310,7 +315,7 @@ export default function Notices() {
     }))
 
     const newNotice: Notice = {
-      id: `n${Date.now()}`,
+      id: newNoticeId,
       title: formTitle,
       content: formContent,
       type: formType as any,
@@ -320,8 +325,8 @@ export default function Notices() {
       attachments: [],
       isImportant: formIsImportant,
       readCount: 0,
-      totalCount: targetHouseholds.length,
-      receipts: receipts.map(r => ({ ...r, noticeId: `n${Date.now()}` })),
+      totalCount: receipts.length,
+      receipts,
     }
 
     addNotice(newNotice)
@@ -698,8 +703,8 @@ export default function Notices() {
               />
             </div>
             <div className="col-span-2">
-              <label className="label">发送范围</label>
-              <div className="flex flex-wrap gap-2">
+              <label className="label">发送范围 <span className="text-red-500">*</span></label>
+              <div className={`flex flex-wrap gap-2 rounded-lg p-2 ${formTargetGroups.length === 0 ? 'border-2 border-red-300 bg-red-50' : ''}`}>
                 {villageGroups.map(g => (
                   <label
                     key={g.id}
@@ -719,6 +724,9 @@ export default function Notices() {
                   </label>
                 ))}
               </div>
+              {formTargetGroups.length === 0 && (
+                <p className="text-xs text-red-500 mt-1">请选择至少一个发送范围</p>
+              )}
             </div>
             <div className="col-span-2 flex items-center gap-2">
               <input

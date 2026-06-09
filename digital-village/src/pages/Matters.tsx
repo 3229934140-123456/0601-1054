@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Search, Plus, FileText, User, Clock, ChevronRight, ClipboardList, Paperclip, X } from 'lucide-react'
+import { Search, Plus, FileText, User, Clock, ChevronRight, ClipboardList, Paperclip, X, AlertCircle, CheckCircle } from 'lucide-react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Table, { TableColumn } from '../components/Table'
@@ -22,7 +22,7 @@ const matterStatusColors: Record<MatterStatus, string> = {
 const matterTypeList: MatterType[] = ['低保申请', '宅基地审批', '证明开具', '土地流转', '医保办理', '养老认证', '矛盾调解']
 
 export default function Matters() {
-  const { matters, addMatter, updateMatterStatus } = useStore()
+  const { matters, addMatter, updateMatterStatus, updateMatterSupplement, completeMatter } = useStore()
   const [searchText, setSearchText] = useState('')
   const [selectedType, setSelectedType] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
@@ -30,7 +30,14 @@ export default function Matters() {
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedMatter, setSelectedMatter] = useState<Matter | null>(null)
   const [showRegister, setShowRegister] = useState(false)
+  const [showSupplementModal, setShowSupplementModal] = useState(false)
+  const [showCompleteModal, setShowCompleteModal] = useState(false)
   const pageSize = 10
+
+  const [supplementRequired, setSupplementRequired] = useState('')
+  const [supplementSubmitted, setSupplementSubmitted] = useState('')
+  const [supplementSubmittedBy, setSupplementSubmittedBy] = useState('申请人')
+  const [completeSummary, setCompleteSummary] = useState('')
 
   const [formType, setFormType] = useState<MatterType | ''>('')
   const [formApplicant, setFormApplicant] = useState('')
@@ -96,6 +103,16 @@ export default function Matters() {
     if (!selectedMatter) return null
     return matters.find(m => m.id === selectedMatter.id) || selectedMatter
   }, [selectedMatter, matters])
+
+  const latestSupplement = useMemo(() => {
+    if (!liveMatter) return null
+    for (let i = liveMatter.progress.length - 1; i >= 0; i--) {
+      if (liveMatter.progress[i].supplementDetail) {
+        return liveMatter.progress[i].supplementDetail
+      }
+    }
+    return null
+  }, [liveMatter])
 
   const handleSubmitRegister = () => {
     if (!formType || !formApplicant || !formGroupId || !formDescription) {
@@ -174,7 +191,50 @@ export default function Matters() {
 
   const handleSupplement = () => {
     if (!liveMatter) return
-    updateMatterStatus(liveMatter.id, '待补充材料', '请申请人补充相关材料')
+    setShowSupplementModal(true)
+  }
+
+  const handleSubmitSupplement = () => {
+    if (!liveMatter) return
+    const requiredMaterials = supplementRequired.split('\n').map(s => s.trim()).filter(Boolean)
+    const submittedMaterials = supplementSubmitted.split('\n').map(s => s.trim()).filter(Boolean)
+    const isCompleted = requiredMaterials.length > 0 && requiredMaterials.every(req => submittedMaterials.includes(req))
+    const supplementDetail = {
+      requiredMaterials,
+      submittedMaterials,
+      submittedBy: supplementSubmittedBy || '申请人',
+      submittedAt: formatNowWithTime(),
+      isCompleted,
+    }
+    updateMatterSupplement(liveMatter.id, supplementDetail, isCompleted ? '材料已补充完毕' : '已提交部分补充材料')
+    setShowSupplementModal(false)
+    resetSupplementForm()
+  }
+
+  const resetSupplementForm = () => {
+    setSupplementRequired('')
+    setSupplementSubmitted('')
+    setSupplementSubmittedBy('申请人')
+  }
+
+  const handleComplete = () => {
+    if (!liveMatter) return
+    setShowCompleteModal(true)
+  }
+
+  const handleSubmitComplete = () => {
+    if (!liveMatter || !completeSummary.trim()) {
+      alert('请填写办理摘要')
+      return
+    }
+    const summary = {
+      content: completeSummary,
+      generatedAt: formatNowWithTime(),
+      handler: liveMatter.handler || '李明',
+    }
+    completeMatter(liveMatter.id, summary)
+    setShowCompleteModal(false)
+    setCompleteSummary('')
   }
 
   const handleReject = () => {
@@ -231,8 +291,18 @@ export default function Matters() {
     {
       key: 'status',
       title: '状态',
-      width: '100px',
-      render: (row) => <Badge variant={matterStatusColors[row.status] as any} size="md">{row.status}</Badge>,
+      width: '140px',
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <Badge variant={matterStatusColors[row.status] as any} size="md">{row.status}</Badge>
+          {row.isOverdue && !['已办结', '已驳回'].includes(row.status) && (
+            <Badge variant="danger" size="md">
+              <AlertCircle className="w-3 h-3 mr-1" />
+              超期
+            </Badge>
+          )}
+        </div>
+      ),
     },
     {
       key: 'action',
@@ -367,13 +437,25 @@ export default function Matters() {
         {liveMatter && (
           <div className="space-y-6">
             <div className="bg-gray-50 rounded-xl p-5">
+              {liveMatter.isOverdue && !['已办结', '已驳回'].includes(liveMatter.status) && (
+                <div className="mb-4 flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                  <span className="text-red-700 font-medium">该事项已超期，预计办结日期：{liveMatter.expectedDate}</span>
+                </div>
+              )}
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <h3 className="text-lg font-bold text-gray-900">{liveMatter.type}</h3>
                     <Badge variant={matterStatusColors[liveMatter.status] as any} size="md">
                       {liveMatter.status}
                     </Badge>
+                    {liveMatter.isOverdue && !['已办结', '已驳回'].includes(liveMatter.status) && (
+                      <Badge variant="danger" size="md">
+                        <AlertCircle className="w-3 h-3 mr-1" />
+                        超期
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-gray-500">
                     申请编号: {liveMatter.matterNo} · 申请日期: {liveMatter.submitDate}
@@ -407,18 +489,83 @@ export default function Matters() {
               </div>
             )}
 
+            {latestSupplement && (
+              <div className="space-y-4">
+                {latestSupplement.requiredMaterials.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-yellow-600" />
+                      需补材料
+                    </h4>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-2">
+                      {latestSupplement.requiredMaterials.map((m, i) => {
+                        const isSubmitted = latestSupplement.submittedMaterials.includes(m)
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            {isSubmitted ? (
+                              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                            ) : (
+                              <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0" />
+                            )}
+                            <span className={`text-sm ${isSubmitted ? 'text-gray-500 line-through' : 'text-gray-800'}`}>{m}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {latestSupplement.submittedMaterials.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                      已补材料
+                      {latestSupplement.submittedBy && (
+                        <span className="text-xs font-normal text-gray-500 ml-1">（提交人：{latestSupplement.submittedBy} · {latestSupplement.submittedAt}）</span>
+                      )}
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {latestSupplement.submittedMaterials.map((m, i) => (
+                        <div key={i} className="flex items-center gap-2 bg-green-50 rounded-lg px-3 py-2">
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                          <span className="text-sm text-gray-700">{m}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {liveMatter.summary && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary-600" />
+                  办理摘要
+                  <span className="text-xs font-normal text-gray-500 ml-1">（经办人：{liveMatter.summary.handler} · {liveMatter.summary.generatedAt}）</span>
+                </h4>
+                <p className="text-gray-700 bg-gray-50 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap">{liveMatter.summary.content}</p>
+              </div>
+            )}
+
             <div>
               <h4 className="font-semibold text-gray-900 mb-4">办理进度</h4>
               <ProgressTimeline steps={getTimelineSteps(liveMatter)} />
             </div>
 
-            {['待受理', '审核中', '待补充材料', '已通过'].includes(liveMatter.status) && (
+            {['待受理', '审核中', '待补充材料'].includes(liveMatter.status) && (
               <div className="flex gap-3 pt-4 border-t border-gray-200">
-                <button onClick={handleAdvance} className="btn-primary">
-                  {liveMatter.status === '已通过' ? '办结归档' : '推进办理'}
-                </button>
+                <button onClick={handleAdvance} className="btn-primary">推进办理</button>
                 <button onClick={handleSupplement} className="btn-outline">补充材料</button>
                 <button onClick={handleReject} className="btn-danger">驳回申请</button>
+              </div>
+            )}
+            {liveMatter.status === '已通过' && (
+              <div className="flex gap-3 pt-4 border-t border-gray-200">
+                <button onClick={handleComplete} className="btn-primary">
+                  <CheckCircle className="w-4 h-4 mr-1" />
+                  办结
+                </button>
+                <button onClick={handleSupplement} className="btn-outline">补充材料</button>
               </div>
             )}
           </div>
@@ -499,6 +646,83 @@ export default function Matters() {
               </div>
             )}
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showSupplementModal}
+        onClose={() => { setShowSupplementModal(false); resetSupplementForm() }}
+        title="补充材料"
+        footer={
+          <>
+            <button onClick={() => { setShowSupplementModal(false); resetSupplementForm() }} className="btn-outline">取消</button>
+            <button onClick={handleSubmitSupplement} className="btn-primary">提交</button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="label">需要补充的材料</label>
+            <textarea
+              value={supplementRequired}
+              onChange={(e) => setSupplementRequired(e.target.value)}
+              className="input min-h-[100px]"
+              placeholder="每行一项，如：&#10;身份证复印件&#10;户口本复印件&#10;收入证明"
+            />
+            <p className="text-xs text-gray-500 mt-1">每行填写一项需要补充的材料</p>
+          </div>
+          <div>
+            <label className="label">已提交的材料</label>
+            <textarea
+              value={supplementSubmitted}
+              onChange={(e) => setSupplementSubmitted(e.target.value)}
+              className="input min-h-[100px]"
+              placeholder="每行一项，如：&#10;身份证复印件"
+            />
+            <p className="text-xs text-gray-500 mt-1">每行填写一项已提交的材料</p>
+          </div>
+          <div>
+            <label className="label">提交人</label>
+            <input
+              type="text"
+              value={supplementSubmittedBy}
+              onChange={(e) => setSupplementSubmittedBy(e.target.value)}
+              className="input"
+              placeholder="请输入提交人姓名"
+            />
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showCompleteModal}
+        onClose={() => { setShowCompleteModal(false); setCompleteSummary('') }}
+        title="办结事项"
+        footer={
+          <>
+            <button onClick={() => { setShowCompleteModal(false); setCompleteSummary('') }} className="btn-outline">取消</button>
+            <button onClick={handleSubmitComplete} className="btn-primary">确认办结</button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="label">办理摘要 <span className="text-red-500">*</span></label>
+            <textarea
+              value={completeSummary}
+              onChange={(e) => setCompleteSummary(e.target.value)}
+              className="input min-h-[150px]"
+              placeholder="请填写办理摘要，说明事项办理情况、处理结果等..."
+            />
+          </div>
+          {liveMatter && (
+            <div className="grid grid-cols-2 gap-4 text-sm bg-gray-50 rounded-lg p-4">
+              <div><span className="text-gray-500">事项类型</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.type}</p></div>
+              <div><span className="text-gray-500">申请人</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.applicant}</p></div>
+              <div><span className="text-gray-500">事项编号</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.matterNo}</p></div>
+              <div><span className="text-gray-500">经办人</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.handler}</p></div>
+            </div>
+          )}
         </div>
       </Modal>
     </div>

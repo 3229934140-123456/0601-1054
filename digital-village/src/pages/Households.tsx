@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Search, Filter, Download, Plus, User, Home, Landmark, Heart, ChevronRight, X, AlertCircle, Pencil, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Search, Filter, Download, Plus, User, Home, Landmark, Heart, ChevronRight, X, AlertCircle, Pencil, Trash2, FileText, Sprout, Bell } from 'lucide-react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Table, { TableColumn } from '../components/Table'
@@ -7,7 +8,7 @@ import Pagination from '../components/Pagination'
 import Modal from '../components/Modal'
 import { useStore } from '../store/StoreContext'
 import { villageGroups } from '../data/mockData'
-import type { Household, FamilyMember, Farmland, AidInfo, HouseInfo } from '../types'
+import type { Household, FamilyMember, Farmland, AidInfo, HouseInfo, Matter, Crop, Livestock, Notice, NoticeReceipt } from '../types'
 
 const familyTypeColors: Record<string, string> = {
   '普通户': 'default',
@@ -30,15 +31,43 @@ const aidStatusColors: Record<string, string> = {
   '待审核': 'warning',
 }
 
+const matterStatusColors: Record<string, string> = {
+  '待受理': 'warning',
+  '审核中': 'info',
+  '待补充材料': 'warning',
+  '已通过': 'success',
+  '已驳回': 'danger',
+  '已办结': 'success',
+}
+
+const industryStatusColors: Record<string, string> = {
+  '种植中': 'info',
+  '生长中': 'info',
+  '待收获': 'warning',
+  '已收获': 'success',
+  '已上市': 'success',
+  '养殖中': 'info',
+  '待出栏': 'warning',
+  '已出栏': 'success',
+}
+
+const noticeTypeColors: Record<string, string> = {
+  '通知公告': 'primary',
+  '政策宣传': 'info',
+  '会议通知': 'warning',
+  '应急通知': 'danger',
+}
+
 export default function Households() {
-  const { households, addHousehold, updateHousehold, updateHouseholdMembers, updateHouseholdHouse, updateHouseholdFarmlands, updateHouseholdAids } = useStore()
+  const { households, matters, crops, livestocks, notices, addHousehold, updateHousehold, updateHouseholdMembers, updateHouseholdHouse, updateHouseholdFarmlands, updateHouseholdAids } = useStore()
+  const navigate = useNavigate()
   const [searchText, setSearchText] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [selectedType, setSelectedType] = useState('')
   const [onlyAbnormal, setOnlyAbnormal] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedHousehold, setSelectedHousehold] = useState<Household | null>(null)
-  const [detailTab, setDetailTab] = useState<'members' | 'house' | 'land' | 'aid'>('members')
+  const [detailTab, setDetailTab] = useState<'members' | 'house' | 'land' | 'aid' | 'matters' | 'industry' | 'notices'>('members')
   const pageSize = 10
 
   const [showAddModal, setShowAddModal] = useState(false)
@@ -66,6 +95,38 @@ export default function Households() {
     if (!selectedHousehold) return null
     return households.find(h => h.id === selectedHousehold.id) || selectedHousehold
   }, [selectedHousehold, households])
+
+  const householdMatters = useMemo(() => {
+    if (!liveHousehold) return []
+    return matters.filter(m => m.householdId === liveHousehold.id)
+  }, [matters, liveHousehold])
+
+  const householdIndustries = useMemo(() => {
+    if (!liveHousehold) return []
+    const cropList = crops.filter(c => c.householdId === liveHousehold.id).map(c => ({
+      ...c,
+      scale: c.scale,
+      unit: c.unit,
+      category: '种植' as const,
+    }))
+    const livestockList = livestocks.filter(l => l.householdId === liveHousehold.id).map(l => ({
+      ...l,
+      scale: l.count,
+      unit: '头/只',
+      category: '养殖' as const,
+    }))
+    return [...cropList, ...livestockList]
+  }, [crops, livestocks, liveHousehold])
+
+  const householdNotices = useMemo(() => {
+    if (!liveHousehold) return []
+    const result: Array<{ notice: Notice; receipt: NoticeReceipt | undefined }> = []
+    notices.forEach(n => {
+      const receipt = n.receipts.find(r => r.householdId === liveHousehold.id)
+      result.push({ notice: n, receipt })
+    })
+    return result
+  }, [notices, liveHousehold])
 
   const filteredHouseholds = useMemo(() => {
     return households.filter(h => {
@@ -499,12 +560,15 @@ export default function Households() {
               </div>
             )}
 
-            <div className="flex gap-1 border-b border-gray-200">
+            <div className="flex gap-1 border-b border-gray-200 flex-wrap">
               {[
                 { key: 'members', label: '家庭成员', icon: User },
                 { key: 'house', label: '住房信息', icon: Home },
                 { key: 'land', label: '耕地信息', icon: Landmark },
                 { key: 'aid', label: '帮扶信息', icon: Heart },
+                { key: 'matters', label: '事项办理', icon: FileText },
+                { key: 'industry', label: '产业台账', icon: Sprout },
+                { key: 'notices', label: '通知回执', icon: Bell },
               ].map((tab) => {
                 const Icon = tab.icon
                 return (
@@ -1072,6 +1136,174 @@ export default function Households() {
                     </div>
                   )
                 )}
+              </div>
+            )}
+
+            {detailTab === 'matters' && (
+              <div>
+                <div className="mb-3">
+                  <p className="text-sm text-gray-500">共 {householdMatters.length} 条办理记录</p>
+                </div>
+                <div className="overflow-hidden rounded-lg border border-gray-200">
+                  <Table
+                    columns={[
+                      { key: 'matterNo', title: '事项编号', width: '120px' },
+                      {
+                        key: 'type',
+                        title: '类型',
+                        width: '120px',
+                        render: (row) => <Badge variant="primary">{row.type}</Badge>,
+                      },
+                      {
+                        key: 'status',
+                        title: '状态',
+                        width: '100px',
+                        render: (row) => (
+                          <Badge variant={matterStatusColors[row.status] as any}>{row.status}</Badge>
+                        ),
+                      },
+                      { key: 'submitDate', title: '提交日期', width: '110px' },
+                      { key: 'expectedDate', title: '预计办结', width: '110px' },
+                      { key: 'handler', title: '经办人', width: '100px' },
+                      {
+                        key: 'action',
+                        title: '操作',
+                        width: '80px',
+                        render: (row) => (
+                          <button
+                            onClick={() => navigate('/matters')}
+                            className="text-primary-600 hover:text-primary-700 font-medium text-sm"
+                          >
+                            查看
+                          </button>
+                        ),
+                      },
+                    ]}
+                    data={householdMatters}
+                    rowKey={(r) => r.id}
+                    emptyText="暂无事项办理记录"
+                  />
+                </div>
+              </div>
+            )}
+
+            {detailTab === 'industry' && (
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <p className="text-sm text-gray-500">共 {householdIndustries.length} 条产业记录</p>
+                  <button
+                    onClick={() => navigate('/industry')}
+                    className="btn-primary inline-flex items-center gap-2"
+                  >
+                    跳转产业
+                  </button>
+                </div>
+                <div className="overflow-hidden rounded-lg border border-gray-200">
+                  <Table
+                    columns={[
+                      {
+                        key: 'category',
+                        title: '类别',
+                        width: '80px',
+                        render: (row) => (
+                          <Badge variant={row.category === '种植' ? 'success' : 'info'}>{row.category}</Badge>
+                        ),
+                      },
+                      { key: 'name', title: '名称' },
+                      { key: 'scale', title: '规模', width: '80px' },
+                      { key: 'unit', title: '单位', width: '80px' },
+                      {
+                        key: 'status',
+                        title: '状态',
+                        width: '100px',
+                        render: (row) => (
+                          <Badge variant={industryStatusColors[row.status] as any}>{row.status}</Badge>
+                        ),
+                      },
+                      { key: 'marketDate', title: '预计上市', width: '120px' },
+                    ]}
+                    data={householdIndustries}
+                    rowKey={(r) => r.id}
+                    emptyText="暂无产业台账记录"
+                  />
+                </div>
+              </div>
+            )}
+
+            {detailTab === 'notices' && (
+              <div>
+                <div className="mb-3">
+                  <p className="text-sm text-gray-500">共 {householdNotices.length} 条通知记录</p>
+                </div>
+                <div className="overflow-hidden rounded-lg border border-gray-200">
+                  <Table
+                    columns={[
+                      {
+                        key: 'title',
+                        title: '通知标题',
+                        render: (row) => (
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{row.notice.title}</span>
+                            {row.notice.isImportant && (
+                              <Badge variant="danger">重要</Badge>
+                            )}
+                          </div>
+                        ),
+                      },
+                      {
+                        key: 'type',
+                        title: '类型',
+                        width: '100px',
+                        render: (row) => (
+                          <Badge variant={noticeTypeColors[row.notice.type] as any}>{row.notice.type}</Badge>
+                        ),
+                      },
+                      { key: 'publishDate', title: '发布日期', width: '110px', render: (row) => row.notice.publishDate },
+                      {
+                        key: 'isRead',
+                        title: '是否已读',
+                        width: '90px',
+                        render: (row) => (
+                          <Badge variant={row.receipt?.isRead ? 'success' : 'default'}>
+                            {row.receipt?.isRead ? '已读' : '未读'}
+                          </Badge>
+                        ),
+                      },
+                      {
+                        key: 'confirmed',
+                        title: '是否确认',
+                        width: '90px',
+                        render: (row) => (
+                          <Badge variant={row.receipt?.confirmed ? 'success' : 'default'}>
+                            {row.receipt?.confirmed ? '已确认' : '未确认'}
+                          </Badge>
+                        ),
+                      },
+                      {
+                        key: 'time',
+                        title: '阅读/确认时间',
+                        width: '160px',
+                        render: (row) => row.receipt?.readDate || row.receipt?.confirmDate || '-',
+                      },
+                      {
+                        key: 'action',
+                        title: '操作',
+                        width: '90px',
+                        render: (row) => (
+                          <button
+                            onClick={() => navigate('/notices')}
+                            className="text-primary-600 hover:text-primary-700 font-medium text-sm"
+                          >
+                            查看详情
+                          </button>
+                        ),
+                      },
+                    ]}
+                    data={householdNotices}
+                    rowKey={(r) => r.notice.id}
+                    emptyText="暂无通知记录"
+                  />
+                </div>
               </div>
             )}
           </div>

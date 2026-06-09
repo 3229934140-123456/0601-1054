@@ -1,24 +1,12 @@
 import { Users, Home, Landmark, FileCheck, Sprout, Bell, AlertTriangle, CheckCircle2, Clock } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import Card from '../components/Card'
 import StatCard from '../components/StatCard'
 import Badge from '../components/Badge'
-import { statistics, villageGroups, todoItems, warningItems, recentActivities, households } from '../data/mockData'
-
-const populationData = villageGroups.map(g => ({
-  name: g.name.replace('东风村', ''),
-  人口: g.population,
-  户数: g.households,
-}))
-
-const familyTypeData = [
-  { name: '普通户', value: statistics.totalHouseholds - statistics.lowIncomeHouseholds - statistics.fiveGuaranteeHouseholds - statistics.monitoredHouseholds - statistics.povertyAlleviationHouseholds, color: '#22c55e' },
-  { name: '低保户', value: statistics.lowIncomeHouseholds, color: '#f59e0b' },
-  { name: '五保户', value: statistics.fiveGuaranteeHouseholds, color: '#ef4444' },
-  { name: '监测户', value: statistics.monitoredHouseholds, color: '#3b82f6' },
-  { name: '脱贫户', value: statistics.povertyAlleviationHouseholds, color: '#8b5cf6' },
-]
+import { useStore } from '../store/StoreContext'
+import { villageGroups } from '../data/mockData'
 
 const todoPriorityColors: Record<string, string> = {
   '高': 'danger',
@@ -39,7 +27,50 @@ const warningLevelColors: Record<string, string> = {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
+  const { households, matters, crops, livestocks, notices, todoItems, warningItems, recentActivities } = useStore()
   const [activeGroup, setActiveGroup] = useState<string | null>(null)
+
+  const liveStats = useMemo(() => {
+    const totalPopulation = households.reduce((sum, h) => sum + h.familyMembers.length, 0)
+    const totalLand = households.reduce((sum, h) => sum + h.farmlands.reduce((s, f) => s + f.area, 0), 0)
+    const pendingMatters = matters.filter(m => ['待受理', '审核中', '待补充材料'].includes(m.status)).length
+    const totalIndustries = crops.length + livestocks.length
+    const unreadNotices = notices.reduce((sum, n) => sum + (n.totalCount - n.readCount), 0)
+    const lowIncome = households.filter(h => h.familyType === '低保户').length
+    const fiveGuarantee = households.filter(h => h.familyType === '五保户').length
+    const monitored = households.filter(h => h.familyType === '监测户').length
+    const poverty = households.filter(h => h.familyType === '脱贫户').length
+    return {
+      totalPopulation,
+      totalHouseholds: households.length,
+      totalLand: Math.round(totalLand * 10) / 10,
+      pendingMatters,
+      totalIndustries,
+      unreadNotices,
+      lowIncome,
+      fiveGuarantee,
+      monitored,
+      poverty,
+    }
+  }, [households, matters, crops, livestocks, notices])
+
+  const populationData = useMemo(() => villageGroups.map(g => {
+    const hs = households.filter(h => h.groupId === g.id)
+    return {
+      name: g.name.replace('东风村', ''),
+      人口: hs.reduce((s, h) => s + h.familyMembers.length, 0),
+      户数: hs.length,
+    }
+  }), [households])
+
+  const familyTypeData = useMemo(() => [
+    { name: '普通户', value: liveStats.totalHouseholds - liveStats.lowIncome - liveStats.fiveGuarantee - liveStats.monitored - liveStats.poverty, color: '#22c55e' },
+    { name: '低保户', value: liveStats.lowIncome, color: '#f59e0b' },
+    { name: '五保户', value: liveStats.fiveGuarantee, color: '#ef4444' },
+    { name: '监测户', value: liveStats.monitored, color: '#3b82f6' },
+    { name: '脱贫户', value: liveStats.poverty, color: '#8b5cf6' },
+  ].filter(d => d.value > 0), [liveStats])
 
   return (
     <div className="space-y-6">
@@ -54,12 +85,12 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard title="总人口" value={statistics.totalPopulation} icon={<Users className="w-6 h-6" />} color="green" trend="1.2%" trendUp />
-        <StatCard title="总户数" value={statistics.totalHouseholds} icon={<Home className="w-6 h-6" />} color="blue" />
-        <StatCard title="耕地面积(亩)" value={statistics.totalLand} icon={<Landmark className="w-6 h-6" />} color="orange" />
-        <StatCard title="办理中事项" value={statistics.pendingMatters} icon={<FileCheck className="w-6 h-6" />} color="purple" />
-        <StatCard title="产业项目" value={statistics.totalIndustries} icon={<Sprout className="w-6 h-6" />} color="green" />
-        <StatCard title="未读通知" value={statistics.unreadNotices} icon={<Bell className="w-6 h-6" />} color="red" />
+        <StatCard title="总人口" value={liveStats.totalPopulation} icon={<Users className="w-6 h-6" />} color="green" />
+        <StatCard title="总户数" value={liveStats.totalHouseholds} icon={<Home className="w-6 h-6" />} color="blue" />
+        <StatCard title="耕地面积(亩)" value={liveStats.totalLand} icon={<Landmark className="w-6 h-6" />} color="orange" />
+        <StatCard title="办理中事项" value={liveStats.pendingMatters} icon={<FileCheck className="w-6 h-6" />} color="purple" />
+        <StatCard title="产业项目" value={liveStats.totalIndustries} icon={<Sprout className="w-6 h-6" />} color="green" />
+        <StatCard title="未读通知(户)" value={liveStats.unreadNotices} icon={<Bell className="w-6 h-6" />} color="red" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -118,13 +149,16 @@ export default function Dashboard() {
                 <div className="bg-white rounded-lg shadow-lg p-3">
                   {(() => {
                     const g = villageGroups.find(x => x.id === activeGroup)
+                    const gh = households.filter(h => h.groupId === activeGroup)
                     return g ? (
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-semibold text-gray-900">{g.name}</p>
-                          <p className="text-sm text-gray-500">人口 {g.population} 人 · {g.households} 户 · 耕地 {g.landArea} 亩</p>
+                          <p className="text-sm text-gray-500">
+                            人口 {gh.reduce((s, h) => s + h.familyMembers.length, 0)} 人 · {gh.length} 户 · 耕地 {g.landArea} 亩
+                          </p>
                         </div>
-                        <Badge variant="primary">{households.filter(h => h.groupId === g.id).length} 户已建档</Badge>
+                        <Badge variant="primary">{gh.length} 户已建档</Badge>
                       </div>
                     ) : null
                   })()}
@@ -139,35 +173,41 @@ export default function Dashboard() {
         </Card>
 
         <Card title="家庭类型分布">
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={familyTypeData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {familyTypeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            {familyTypeData.map((item) => (
-              <div key={item.name} className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: item.color }} />
-                <span className="text-sm text-gray-600">{item.name}</span>
-                <span className="text-sm font-medium ml-auto">{item.value}</span>
+          {familyTypeData.length > 0 ? (
+            <>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={familyTypeData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {familyTypeData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-            ))}
-          </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {familyTypeData.map((item) => (
+                  <div key={item.name} className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: item.color }} />
+                    <span className="text-sm text-gray-600">{item.name}</span>
+                    <span className="text-sm font-medium ml-auto">{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-gray-400">暂无数据</div>
+          )}
         </Card>
       </div>
 
@@ -187,10 +227,18 @@ export default function Dashboard() {
         </Card>
 
         <div className="space-y-6">
-          <Card title="待办事项" subtitle={`${todoItems.filter(t => t.status !== '已完成').length} 项待处理`}>
+          <Card
+            title="待办事项"
+            subtitle={`${todoItems.filter(t => t.status !== '已完成').length} 项待处理`}
+            action={<button onClick={() => navigate('/matters')} className="text-xs text-primary-600 hover:text-primary-700">查看全部</button>}
+          >
             <div className="space-y-3">
-              {todoItems.slice(0, 4).map((todo) => (
-                <div key={todo.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50">
+              {todoItems.length > 0 ? todoItems.slice(0, 4).map((todo) => (
+                <div
+                  key={todo.id}
+                  className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  onClick={() => todo.relatedId && navigate('/matters')}
+                >
                   <div className={`mt-0.5 p-1 rounded-full ${
                     todo.priority === '高' ? 'bg-red-100' : todo.priority === '中' ? 'bg-yellow-100' : 'bg-gray-100'
                   }`}>
@@ -209,16 +257,22 @@ export default function Dashboard() {
                   </div>
                   <Badge variant={todoPriorityColors[todo.priority] as any}>{todo.priority}</Badge>
                 </div>
-              ))}
+              )) : (
+                <div className="text-sm text-gray-400 text-center py-6">暂无待办</div>
+              )}
             </div>
           </Card>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="预警信息" subtitle={`${warningItems.filter(w => !w.isHandled).length} 条待处理`}>
-          <div className="space-y-3">
-            {warningItems.map((warning) => (
+        <Card
+          title="预警信息"
+          subtitle={`${warningItems.filter(w => !w.isHandled).length} 条待处理`}
+          action={<button onClick={() => navigate('/notices', { state: { tab: 'abnormal' } })} className="text-xs text-primary-600 hover:text-primary-700">查看全部</button>}
+        >
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {warningItems.length > 0 ? warningItems.map((warning) => (
               <div key={warning.id} className={`flex items-start gap-3 p-3 rounded-lg border ${
                 warning.isHandled ? 'bg-gray-50 border-gray-200' :
                 warning.level === '严重' ? 'bg-red-50 border-red-200' :
@@ -243,15 +297,20 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-400 mt-0.5">{warning.time}</p>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="text-sm text-gray-400 text-center py-6">暂无预警</div>
+            )}
           </div>
         </Card>
 
-        <Card title="近期活动">
-          <div className="space-y-0">
-            {recentActivities.map((activity, index) => (
+        <Card
+          title="近期活动"
+          action={<button className="text-xs text-primary-600 hover:text-primary-700">查看全部</button>}
+        >
+          <div className="space-y-0 max-h-96 overflow-y-auto">
+            {recentActivities.length > 0 ? recentActivities.slice(0, 10).map((activity, index) => (
               <div key={activity.id} className="relative pl-8 pb-5 last:pb-0">
-                {index < recentActivities.length - 1 && (
+                {index < recentActivities.length - 1 && index < 9 && (
                   <div className="absolute left-[11px] top-5 bottom-0 w-0.5 bg-gray-200" />
                 )}
                 <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center">
@@ -266,7 +325,9 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-400 mt-1">{activity.time} · {activity.operator}</p>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="text-sm text-gray-400 text-center py-6">暂无活动记录</div>
+            )}
           </div>
         </Card>
       </div>

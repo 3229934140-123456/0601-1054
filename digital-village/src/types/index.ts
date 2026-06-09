@@ -78,6 +78,21 @@ export interface MatterProgress {
   operator: string
   remark: string
   time: string
+  supplementDetail?: SupplementDetail
+}
+
+export interface SupplementDetail {
+  requiredMaterials: string[]
+  submittedMaterials: string[]
+  submittedBy: string
+  submittedAt: string
+  isCompleted: boolean
+}
+
+export interface MatterSummary {
+  content: string
+  generatedAt: string
+  handler: string
 }
 
 export interface Matter {
@@ -96,6 +111,8 @@ export interface Matter {
   description: string
   handler: string
   expectedDate: string
+  isOverdue?: boolean
+  summary?: MatterSummary
 }
 
 export type IndustryCategory = '种植' | '养殖' | '加工' | '服务'
