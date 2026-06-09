@@ -6,7 +6,8 @@ import Badge from '../components/Badge'
 import Table, { TableColumn } from '../components/Table'
 import Pagination from '../components/Pagination'
 import Modal from '../components/Modal'
-import { crops, livestocks, villageGroups } from '../data/mockData'
+import { useStore } from '../store/StoreContext'
+import { villageGroups } from '../data/mockData'
 import type { Crop, Livestock } from '../types'
 
 const cropStatusColors: Record<string, string> = {
@@ -27,6 +28,7 @@ const livestockStatusColors: Record<string, string> = {
 type TabType = 'crop' | 'livestock'
 
 export default function Industry() {
+  const { crops, livestocks, addCrop, addLivestock } = useStore()
   const [activeTab, setActiveTab] = useState<TabType>('crop')
   const [searchText, setSearchText] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -35,6 +37,42 @@ export default function Industry() {
   const [showAdd, setShowAdd] = useState(false)
   const pageSize = 8
 
+  const formatNow = () => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  }
+
+  const [cropForm, setCropForm] = useState({
+    name: '',
+    variety: '',
+    scale: '',
+    unit: '亩',
+    householdName: '',
+    householdId: '',
+    groupId: '',
+    plantDate: '',
+    harvestDate: '',
+    marketDate: '',
+    expectedYield: '',
+    price: '',
+    status: '种植中' as Crop['status'],
+  })
+
+  const [livestockForm, setLivestockForm] = useState({
+    name: '',
+    species: '',
+    count: '',
+    householdName: '',
+    householdId: '',
+    groupId: '',
+    breedDate: '',
+    marketDate: '',
+    expectedWeight: '',
+    price: '',
+    status: '养殖中' as Livestock['status'],
+  })
+
   const filteredCrops = useMemo(() => {
     return crops.filter(c => {
       if (searchText && !c.name.includes(searchText) && !c.householdName.includes(searchText) && !c.variety.includes(searchText)) return false
@@ -42,7 +80,7 @@ export default function Industry() {
       if (selectedStatus && c.status !== selectedStatus) return false
       return true
     })
-  }, [searchText, selectedGroup, selectedStatus])
+  }, [crops, searchText, selectedGroup, selectedStatus])
 
   const filteredLivestocks = useMemo(() => {
     return livestocks.filter(l => {
@@ -51,7 +89,7 @@ export default function Industry() {
       if (selectedStatus && l.status !== selectedStatus) return false
       return true
     })
-  }, [searchText, selectedGroup, selectedStatus])
+  }, [livestocks, searchText, selectedGroup, selectedStatus])
 
   const currentData = activeTab === 'crop' ? filteredCrops : filteredLivestocks
   const paginatedData = useMemo(() => {
@@ -59,13 +97,13 @@ export default function Industry() {
     return currentData.slice(start, start + pageSize)
   }, [currentData, currentPage])
 
-  const categoryData = [
+  const categoryData = useMemo(() => [
     { name: '水稻', value: crops.filter(c => c.name === '水稻').reduce((s, c) => s + c.scale, 0), color: '#22c55e' },
     { name: '玉米', value: crops.filter(c => c.name === '玉米').reduce((s, c) => s + c.scale, 0), color: '#f59e0b' },
     { name: '小麦', value: crops.filter(c => c.name === '小麦').reduce((s, c) => s + c.scale, 0), color: '#eab308' },
     { name: '柑橘', value: crops.filter(c => c.name === '柑橘').reduce((s, c) => s + c.scale, 0), color: '#f97316' },
     { name: '蔬菜', value: crops.filter(c => c.name === '蔬菜').reduce((s, c) => s + c.scale, 0), color: '#84cc16' },
-  ]
+  ], [crops])
 
   const monthlyData = [
     { month: '1月', 种植: 35, 养殖: 20 },
@@ -76,7 +114,7 @@ export default function Industry() {
     { month: '6月', 种植: 48, 养殖: 52 },
   ]
 
-  const totalStats = {
+  const totalStats = useMemo(() => ({
     totalCropScale: crops.reduce((s, c) => s + c.scale, 0).toFixed(1),
     totalLivestockCount: livestocks.reduce((s, l) => s + l.count, 0),
     totalValue: (
@@ -84,7 +122,7 @@ export default function Industry() {
       livestocks.filter(l => l.status === '已上市' || l.status === '已出栏').reduce((s, l) => s + l.count * l.expectedWeight * l.price, 0)
     ).toLocaleString(),
     toMarketCount: crops.filter(c => c.status === '待收获').length + livestocks.filter(l => l.status === '待出栏').length,
-  }
+  }), [crops, livestocks])
 
   const cropColumns: TableColumn<Crop>[] = [
     {
@@ -199,6 +237,100 @@ export default function Industry() {
     a.download = `${activeTab === 'crop' ? '种植台账' : '养殖台账'}_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const resetCropForm = () => {
+    setCropForm({
+      name: '',
+      variety: '',
+      scale: '',
+      unit: '亩',
+      householdName: '',
+      householdId: '',
+      groupId: '',
+      plantDate: '',
+      harvestDate: '',
+      marketDate: '',
+      expectedYield: '',
+      price: '',
+      status: '种植中',
+    })
+  }
+
+  const resetLivestockForm = () => {
+    setLivestockForm({
+      name: '',
+      species: '',
+      count: '',
+      householdName: '',
+      householdId: '',
+      groupId: '',
+      breedDate: '',
+      marketDate: '',
+      expectedWeight: '',
+      price: '',
+      status: '养殖中',
+    })
+  }
+
+  const resetForm = () => {
+    if (activeTab === 'crop') {
+      resetCropForm()
+    } else {
+      resetLivestockForm()
+    }
+  }
+
+  const handleSubmit = () => {
+    if (activeTab === 'crop') {
+      if (!cropForm.name || !cropForm.scale || !cropForm.householdName || !cropForm.groupId) {
+        alert('请填写必填项')
+        return
+      }
+      const group = villageGroups.find(g => g.id === cropForm.groupId)
+      const newCrop: Crop = {
+        id: `c${Date.now()}`,
+        name: cropForm.name,
+        category: '种植',
+        variety: cropForm.variety,
+        scale: Number(cropForm.scale) || 0,
+        unit: cropForm.unit,
+        plantDate: cropForm.plantDate || formatNow(),
+        harvestDate: cropForm.harvestDate || '',
+        marketDate: cropForm.marketDate || '',
+        expectedYield: Number(cropForm.expectedYield) || 0,
+        price: Number(cropForm.price) || 0,
+        status: cropForm.status,
+        householdId: cropForm.householdId,
+        householdName: cropForm.householdName,
+        groupId: cropForm.groupId,
+      }
+      addCrop(newCrop)
+    } else {
+      if (!livestockForm.name || !livestockForm.count || !livestockForm.householdName || !livestockForm.groupId) {
+        alert('请填写必填项')
+        return
+      }
+      const newLivestock: Livestock = {
+        id: `l${Date.now()}`,
+        name: livestockForm.name,
+        category: '养殖',
+        species: livestockForm.species,
+        count: Number(livestockForm.count) || 0,
+        breedDate: livestockForm.breedDate || formatNow(),
+        marketDate: livestockForm.marketDate || '',
+        expectedWeight: Number(livestockForm.expectedWeight) || 0,
+        price: Number(livestockForm.price) || 0,
+        status: livestockForm.status,
+        householdId: livestockForm.householdId,
+        householdName: livestockForm.householdName,
+        groupId: livestockForm.groupId,
+      }
+      addLivestock(newLivestock)
+    }
+    resetForm()
+    setShowAdd(false)
+    setCurrentPage(1)
   }
 
   return (
@@ -403,12 +535,12 @@ export default function Industry() {
 
       <Modal
         open={showAdd}
-        onClose={() => setShowAdd(false)}
+        onClose={() => { setShowAdd(false); resetForm() }}
         title={activeTab === 'crop' ? '录入种植信息' : '录入养殖信息'}
         footer={
           <>
-            <button onClick={() => setShowAdd(false)} className="btn-outline">取消</button>
-            <button onClick={() => setShowAdd(false)} className="btn-primary">保存</button>
+            <button onClick={() => { setShowAdd(false); resetForm() }} className="btn-outline">取消</button>
+            <button onClick={handleSubmit} className="btn-primary">保存</button>
           </>
         }
         width="max-w-3xl"
@@ -418,7 +550,7 @@ export default function Industry() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">作物名称 <span className="text-red-500">*</span></label>
-                <select className="select">
+                <select value={cropForm.name} onChange={(e) => setCropForm({ ...cropForm, name: e.target.value })} className="select">
                   <option value="">请选择</option>
                   <option>水稻</option><option>玉米</option><option>小麦</option>
                   <option>柑橘</option><option>蔬菜</option>
@@ -426,43 +558,51 @@ export default function Industry() {
               </div>
               <div>
                 <label className="label">品种</label>
-                <input type="text" className="input" placeholder="请输入品种" />
+                <input type="text" value={cropForm.variety} onChange={(e) => setCropForm({ ...cropForm, variety: e.target.value })} className="input" placeholder="请输入品种" />
               </div>
               <div>
                 <label className="label">种植规模 <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
-                  <input type="number" className="input" placeholder="数量" />
-                  <select className="select w-24"><option>亩</option></select>
+                  <input type="number" value={cropForm.scale} onChange={(e) => setCropForm({ ...cropForm, scale: e.target.value })} className="input" placeholder="数量" />
+                  <select value={cropForm.unit} onChange={(e) => setCropForm({ ...cropForm, unit: e.target.value })} className="select w-24"><option>亩</option></select>
                 </div>
               </div>
               <div>
+                <label className="label">村组 <span className="text-red-500">*</span></label>
+                <select value={cropForm.groupId} onChange={(e) => setCropForm({ ...cropForm, groupId: e.target.value })} className="select">
+                  <option value="">请选择村组</option>
+                  {villageGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="label">种植户 <span className="text-red-500">*</span></label>
-                <select className="select"><option value="">请选择农户</option></select>
+                <input type="text" value={cropForm.householdName} onChange={(e) => setCropForm({ ...cropForm, householdName: e.target.value })} className="input" placeholder="请输入种植户姓名" />
               </div>
               <div>
                 <label className="label">播种日期</label>
-                <input type="date" className="input" />
+                <input type="date" value={cropForm.plantDate} onChange={(e) => setCropForm({ ...cropForm, plantDate: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="label">预计收获日期</label>
-                <input type="date" className="input" />
+                <input type="date" value={cropForm.harvestDate} onChange={(e) => setCropForm({ ...cropForm, harvestDate: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="label">预计上市日期</label>
-                <input type="date" className="input" />
+                <input type="date" value={cropForm.marketDate} onChange={(e) => setCropForm({ ...cropForm, marketDate: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="label">预计产量(kg)</label>
-                <input type="number" className="input" placeholder="请输入预计产量" />
+                <input type="number" value={cropForm.expectedYield} onChange={(e) => setCropForm({ ...cropForm, expectedYield: e.target.value })} className="input" placeholder="请输入预计产量" />
               </div>
               <div>
                 <label className="label">单价(元/kg)</label>
-                <input type="number" className="input" placeholder="请输入预计单价" />
+                <input type="number" value={cropForm.price} onChange={(e) => setCropForm({ ...cropForm, price: e.target.value })} className="input" placeholder="请输入预计单价" />
               </div>
               <div>
                 <label className="label">状态</label>
-                <select className="select">
+                <select value={cropForm.status} onChange={(e) => setCropForm({ ...cropForm, status: e.target.value as Crop['status'] })} className="select">
                   <option>种植中</option><option>生长中</option><option>待收获</option>
+                  <option>已收获</option><option>已上市</option>
                 </select>
               </div>
             </div>
@@ -470,7 +610,7 @@ export default function Industry() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">畜禽名称 <span className="text-red-500">*</span></label>
-                <select className="select">
+                <select value={livestockForm.name} onChange={(e) => setLivestockForm({ ...livestockForm, name: e.target.value })} className="select">
                   <option value="">请选择</option>
                   <option>生猪</option><option>土鸡</option><option>山羊</option>
                   <option>肉牛</option>
@@ -478,39 +618,46 @@ export default function Industry() {
               </div>
               <div>
                 <label className="label">品种</label>
-                <input type="text" className="input" placeholder="请输入品种" />
+                <input type="text" value={livestockForm.species} onChange={(e) => setLivestockForm({ ...livestockForm, species: e.target.value })} className="input" placeholder="请输入品种" />
               </div>
               <div>
                 <label className="label">养殖数量 <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
-                  <input type="number" className="input" placeholder="数量" />
+                  <input type="number" value={livestockForm.count} onChange={(e) => setLivestockForm({ ...livestockForm, count: e.target.value })} className="input" placeholder="数量" />
                   <select className="select w-24"><option>头/只</option></select>
                 </div>
               </div>
               <div>
+                <label className="label">村组 <span className="text-red-500">*</span></label>
+                <select value={livestockForm.groupId} onChange={(e) => setLivestockForm({ ...livestockForm, groupId: e.target.value })} className="select">
+                  <option value="">请选择村组</option>
+                  {villageGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="label">养殖户 <span className="text-red-500">*</span></label>
-                <select className="select"><option value="">请选择农户</option></select>
+                <input type="text" value={livestockForm.householdName} onChange={(e) => setLivestockForm({ ...livestockForm, householdName: e.target.value })} className="input" placeholder="请输入养殖户姓名" />
               </div>
               <div>
                 <label className="label">入栏日期</label>
-                <input type="date" className="input" />
+                <input type="date" value={livestockForm.breedDate} onChange={(e) => setLivestockForm({ ...livestockForm, breedDate: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="label">预计上市日期</label>
-                <input type="date" className="input" />
+                <input type="date" value={livestockForm.marketDate} onChange={(e) => setLivestockForm({ ...livestockForm, marketDate: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="label">预计重量(kg/只)</label>
-                <input type="number" className="input" placeholder="请输入预计重量" />
+                <input type="number" value={livestockForm.expectedWeight} onChange={(e) => setLivestockForm({ ...livestockForm, expectedWeight: e.target.value })} className="input" placeholder="请输入预计重量" />
               </div>
               <div>
                 <label className="label">单价(元/kg)</label>
-                <input type="number" className="input" placeholder="请输入预计单价" />
+                <input type="number" value={livestockForm.price} onChange={(e) => setLivestockForm({ ...livestockForm, price: e.target.value })} className="input" placeholder="请输入预计单价" />
               </div>
               <div className="col-span-2">
                 <label className="label">状态</label>
-                <select className="select">
-                  <option>养殖中</option><option>待出栏</option>
+                <select value={livestockForm.status} onChange={(e) => setLivestockForm({ ...livestockForm, status: e.target.value as Livestock['status'] })} className="select">
+                  <option>养殖中</option><option>待出栏</option><option>已出栏</option><option>已上市</option>
                 </select>
               </div>
             </div>

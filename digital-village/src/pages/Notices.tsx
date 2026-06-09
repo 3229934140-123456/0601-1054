@@ -5,7 +5,8 @@ import Badge from '../components/Badge'
 import Table, { TableColumn } from '../components/Table'
 import Pagination from '../components/Pagination'
 import Modal from '../components/Modal'
-import { notices, villageGroups, households } from '../data/mockData'
+import { useStore } from '../store/StoreContext'
+import { villageGroups } from '../data/mockData'
 import type { Notice, NoticeReceipt } from '../types'
 
 const noticeTypeColors: Record<string, string> = {
@@ -18,14 +19,30 @@ const noticeTypeColors: Record<string, string> = {
 type TabType = 'notices' | 'receipts' | 'abnormal'
 
 export default function Notices() {
+  const { notices, households, addNotice } = useStore()
   const [activeTab, setActiveTab] = useState<TabType>('notices')
   const [searchText, setSearchText] = useState('')
   const [selectedType, setSelectedType] = useState('')
   const [onlyImportant, setOnlyImportant] = useState(false)
+  const [abnormalTypeFilter, setAbnormalTypeFilter] = useState('')
+  const [abnormalLevelFilter, setAbnormalLevelFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedNotice, setSelectedNotice] = useState<Notice | null>(null)
   const [showPublish, setShowPublish] = useState(false)
   const pageSize = 6
+
+  const [formTitle, setFormTitle] = useState('')
+  const [formType, setFormType] = useState('')
+  const [formContent, setFormContent] = useState('')
+  const [formTargetGroups, setFormTargetGroups] = useState<string[]>(villageGroups.map(g => g.id))
+  const [formIsImportant, setFormIsImportant] = useState(false)
+  const [formPublisher, setFormPublisher] = useState('村委会')
+
+  const formatNow = () => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  }
 
   const filteredNotices = useMemo(() => {
     return notices.filter(n => {
@@ -34,7 +51,7 @@ export default function Notices() {
       if (onlyImportant && !n.isImportant) return false
       return true
     })
-  }, [searchText, selectedType, onlyImportant])
+  }, [notices, searchText, selectedType, onlyImportant])
 
   const allReceipts = useMemo(() => {
     const receipts: (NoticeReceipt & { noticeTitle: string; noticeType: string; publishDate: string })[] = []
@@ -44,7 +61,7 @@ export default function Notices() {
       })
     })
     return receipts
-  }, [])
+  }, [notices])
 
   const filteredReceipts = useMemo(() => {
     return allReceipts.filter(r => {
@@ -55,7 +72,7 @@ export default function Notices() {
       }
       return true
     })
-  }, [allReceipts, searchText, selectedType])
+  }, [allReceipts, notices, searchText, selectedType])
 
   const abnormalData = useMemo(() => {
     const result: { type: string; name: string; reason: string; relatedId: string; level: '严重' | '警告' | '提示' }[] = []
@@ -69,7 +86,18 @@ export default function Notices() {
       }
     })
     return result
-  }, [])
+  }, [households, notices])
+
+  const filteredAbnormalData = useMemo(() => {
+    return abnormalData.filter(item => {
+      if (searchText && !item.name.includes(searchText) && !item.reason.includes(searchText) && !item.type.includes(searchText)) {
+        return false
+      }
+      if (abnormalTypeFilter && item.type !== abnormalTypeFilter) return false
+      if (abnormalLevelFilter && item.level !== abnormalLevelFilter) return false
+      return true
+    })
+  }, [abnormalData, searchText, abnormalTypeFilter, abnormalLevelFilter])
 
   const paginatedNotices = useMemo(() => {
     const start = (currentPage - 1) * pageSize
@@ -91,7 +119,12 @@ export default function Notices() {
       confirmedReceipts,
       receiptRate: totalReceipts > 0 ? ((confirmedReceipts / totalReceipts) * 100).toFixed(1) : '0',
     }
-  }, [allReceipts])
+  }, [notices, allReceipts])
+
+  const liveNotice = useMemo(() => {
+    if (!selectedNotice) return null
+    return notices.find(n => n.id === selectedNotice.id) || selectedNotice
+  }, [selectedNotice, notices])
 
   const noticeColumns: TableColumn<Notice>[] = [
     {
@@ -240,7 +273,7 @@ export default function Notices() {
 
   const handleExportAbnormal = () => {
     const headers = ['异常类型', '对象名称', '异常原因', '级别']
-    const rows = abnormalData.map(r => [r.type, r.name, r.reason, r.level])
+    const rows = filteredAbnormalData.map(r => [r.type, r.name, r.reason, r.level])
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -249,6 +282,60 @@ export default function Notices() {
     a.download = `异常数据清单_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const resetForm = () => {
+    setFormTitle('')
+    setFormType('')
+    setFormContent('')
+    setFormTargetGroups(villageGroups.map(g => g.id))
+    setFormIsImportant(false)
+    setFormPublisher('村委会')
+  }
+
+  const handleSubmitPublish = () => {
+    if (!formTitle || !formType || !formContent) {
+      alert('请填写必填项')
+      return
+    }
+
+    const targetHouseholds = households.filter(h => formTargetGroups.includes(h.groupId))
+    const receipts: NoticeReceipt[] = targetHouseholds.map(h => ({
+      id: `r${Date.now()}_${h.id}`,
+      noticeId: '',
+      householdId: h.id,
+      householdName: h.householder,
+      isRead: false,
+      confirmed: false,
+    }))
+
+    const newNotice: Notice = {
+      id: `n${Date.now()}`,
+      title: formTitle,
+      content: formContent,
+      type: formType as any,
+      publishDate: formatNow(),
+      publisher: formPublisher || '村委会',
+      targetGroups: formTargetGroups,
+      attachments: [],
+      isImportant: formIsImportant,
+      readCount: 0,
+      totalCount: targetHouseholds.length,
+      receipts: receipts.map(r => ({ ...r, noticeId: `n${Date.now()}` })),
+    }
+
+    addNotice(newNotice)
+    resetForm()
+    setShowPublish(false)
+    setCurrentPage(1)
+  }
+
+  const toggleTargetGroup = (groupId: string) => {
+    if (formTargetGroups.includes(groupId)) {
+      setFormTargetGroups(formTargetGroups.filter(g => g !== groupId))
+    } else {
+      setFormTargetGroups([...formTargetGroups, groupId])
+    }
   }
 
   return (
@@ -389,6 +476,35 @@ export default function Notices() {
               </select>
             </div>
           )}
+          {activeTab === 'abnormal' && (
+            <>
+              <div className="min-w-[140px]">
+                <label className="label">异常类型</label>
+                <select
+                  value={abnormalTypeFilter}
+                  onChange={(e) => { setAbnormalTypeFilter(e.target.value); setCurrentPage(1) }}
+                  className="select"
+                >
+                  <option value="">全部类型</option>
+                  <option value="农户异常">农户异常</option>
+                  <option value="通知未读">通知未读</option>
+                </select>
+              </div>
+              <div className="min-w-[130px]">
+                <label className="label">异常级别</label>
+                <select
+                  value={abnormalLevelFilter}
+                  onChange={(e) => { setAbnormalLevelFilter(e.target.value); setCurrentPage(1) }}
+                  className="select"
+                >
+                  <option value="">全部级别</option>
+                  <option value="严重">严重</option>
+                  <option value="警告">警告</option>
+                  <option value="提示">提示</option>
+                </select>
+              </div>
+            </>
+          )}
           {activeTab === 'notices' && (
             <div className="flex items-center gap-2 pb-2">
               <input
@@ -402,7 +518,10 @@ export default function Notices() {
             </div>
           )}
           <button
-            onClick={() => { setSearchText(''); setSelectedType(''); setOnlyImportant(false); setCurrentPage(1) }}
+            onClick={() => {
+              setSearchText(''); setSelectedType(''); setOnlyImportant(false);
+              setAbnormalTypeFilter(''); setAbnormalLevelFilter(''); setCurrentPage(1);
+            }}
             className="btn-secondary inline-flex items-center gap-2"
           >
             <Filter className="w-4 h-4" />
@@ -429,35 +548,50 @@ export default function Notices() {
             </>
           )}
           {activeTab === 'abnormal' && (
-            <Table columns={abnormalColumns} data={abnormalData} rowKey={(r) => r.relatedId + r.type} />
+            <>
+              <Table columns={abnormalColumns} data={filteredAbnormalData} rowKey={(r) => r.relatedId + r.type} />
+              <div className="px-4 py-3 border-t border-gray-200 bg-gray-50 text-sm text-gray-600">
+                共 <span className="font-medium">{filteredAbnormalData.length}</span> 条异常数据
+              </div>
+            </>
           )}
         </div>
       </Card>
 
       <Modal
-        open={!!selectedNotice}
+        open={!!liveNotice}
         onClose={() => setSelectedNotice(null)}
-        title={selectedNotice?.title || ''}
+        title={liveNotice?.title || ''}
         width="max-w-3xl"
       >
-        {selectedNotice && (
+        {liveNotice && (
           <div className="space-y-5">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge variant={noticeTypeColors[selectedNotice.type] as any} size="md">{selectedNotice.type}</Badge>
-              {selectedNotice.isImportant && <Badge variant="danger" size="md">重要</Badge>}
-              <span className="text-sm text-gray-500">发布人: {selectedNotice.publisher}</span>
-              <span className="text-sm text-gray-500">发布时间: {selectedNotice.publishDate}</span>
+              <Badge variant={noticeTypeColors[liveNotice.type] as any} size="md">{liveNotice.type}</Badge>
+              {liveNotice.isImportant && <Badge variant="danger" size="md">重要</Badge>}
+              <span className="text-sm text-gray-500">发布人: {liveNotice.publisher}</span>
+              <span className="text-sm text-gray-500">发布时间: {liveNotice.publishDate}</span>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-gray-900 mb-2">发送范围</h4>
+              <div className="flex flex-wrap gap-2">
+                {liveNotice.targetGroups.map(gid => {
+                  const g = villageGroups.find(v => v.id === gid)
+                  return g ? <Badge key={gid} variant="info">{g.name}</Badge> : null
+                })}
+              </div>
             </div>
 
             <div className="bg-gray-50 rounded-lg p-4">
-              <p className="text-gray-700 leading-relaxed whitespace-pre-line">{selectedNotice.content}</p>
+              <p className="text-gray-700 leading-relaxed whitespace-pre-line">{liveNotice.content}</p>
             </div>
 
-            {selectedNotice.attachments.length > 0 && (
+            {liveNotice.attachments.length > 0 && (
               <div>
                 <h4 className="font-semibold text-gray-900 mb-2">附件</h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedNotice.attachments.map((a, i) => (
+                  {liveNotice.attachments.map((a, i) => (
                     <div key={i} className="flex items-center gap-2 bg-blue-50 text-blue-700 rounded-lg px-3 py-2 text-sm">
                       <FileText className="w-4 h-4" />
                       {a}
@@ -471,14 +605,14 @@ export default function Notices() {
               <div className="flex items-center justify-between mb-3">
                 <h4 className="font-semibold text-gray-900">阅读回执情况</h4>
                 <div className="text-sm text-gray-500">
-                  已阅读 {selectedNotice.readCount}/{selectedNotice.totalCount} 户 ·
-                  已确认 {selectedNotice.receipts.filter(r => r.confirmed).length}/{selectedNotice.receipts.length} 户
+                  已阅读 {liveNotice.readCount}/{liveNotice.totalCount} 户 ·
+                  已确认 {liveNotice.receipts.filter(r => r.confirmed).length}/{liveNotice.receipts.length} 户
                 </div>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
                 <div
                   className="bg-primary-500 h-2 rounded-full transition-all"
-                  style={{ width: `${(selectedNotice.readCount / selectedNotice.totalCount) * 100}%` }}
+                  style={{ width: `${(liveNotice.readCount / liveNotice.totalCount) * 100}%` }}
                 />
               </div>
               <div className="border border-gray-200 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
@@ -492,7 +626,7 @@ export default function Notices() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {selectedNotice.receipts.map(r => (
+                    {liveNotice.receipts.map(r => (
                       <tr key={r.id}>
                         <td className="table-td font-medium">{r.householdName}</td>
                         <td className="table-td">
@@ -514,13 +648,13 @@ export default function Notices() {
 
       <Modal
         open={showPublish}
-        onClose={() => setShowPublish(false)}
+        onClose={() => { setShowPublish(false); resetForm() }}
         title="发布通知"
         width="max-w-2xl"
         footer={
           <>
-            <button onClick={() => setShowPublish(false)} className="btn-outline">取消</button>
-            <button onClick={() => setShowPublish(false)} className="btn-primary inline-flex items-center gap-2">
+            <button onClick={() => { setShowPublish(false); resetForm() }} className="btn-outline">取消</button>
+            <button onClick={handleSubmitPublish} className="btn-primary inline-flex items-center gap-2">
               <Send className="w-4 h-4" />
               发布
             </button>
@@ -531,11 +665,21 @@ export default function Notices() {
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="label">通知标题 <span className="text-red-500">*</span></label>
-              <input type="text" className="input" placeholder="请输入通知标题" />
+              <input
+                type="text"
+                className="input"
+                placeholder="请输入通知标题"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+              />
             </div>
             <div>
               <label className="label">通知类型 <span className="text-red-500">*</span></label>
-              <select className="select">
+              <select
+                className="select"
+                value={formType}
+                onChange={(e) => setFormType(e.target.value)}
+              >
                 <option value="">请选择类型</option>
                 <option>通知公告</option>
                 <option>政策宣传</option>
@@ -545,26 +689,55 @@ export default function Notices() {
             </div>
             <div>
               <label className="label">发布人</label>
-              <input type="text" className="input" placeholder="村委会" defaultValue="村委会" />
+              <input
+                type="text"
+                className="input"
+                placeholder="村委会"
+                value={formPublisher}
+                onChange={(e) => setFormPublisher(e.target.value)}
+              />
             </div>
             <div className="col-span-2">
               <label className="label">发送范围</label>
               <div className="flex flex-wrap gap-2">
                 {villageGroups.map(g => (
-                  <label key={g.id} className="inline-flex items-center gap-1.5 bg-gray-100 rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-gray-200">
-                    <input type="checkbox" defaultChecked className="w-4 h-4 text-primary-600 rounded" />
+                  <label
+                    key={g.id}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
+                      formTargetGroups.includes(g.id)
+                        ? 'bg-primary-100 text-primary-700'
+                        : 'bg-gray-100 hover:bg-gray-200'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={formTargetGroups.includes(g.id)}
+                      onChange={() => toggleTargetGroup(g.id)}
+                      className="w-4 h-4 text-primary-600 rounded"
+                    />
                     {g.name}
                   </label>
                 ))}
               </div>
             </div>
             <div className="col-span-2 flex items-center gap-2">
-              <input type="checkbox" id="importantNotice" className="w-4 h-4 text-red-600 rounded" />
+              <input
+                type="checkbox"
+                id="importantNotice"
+                checked={formIsImportant}
+                onChange={(e) => setFormIsImportant(e.target.checked)}
+                className="w-4 h-4 text-red-600 rounded"
+              />
               <label htmlFor="importantNotice" className="text-sm text-gray-700">标为重要通知</label>
             </div>
             <div className="col-span-2">
               <label className="label">通知内容 <span className="text-red-500">*</span></label>
-              <textarea className="input min-h-[160px]" placeholder="请输入通知详细内容..." />
+              <textarea
+                className="input min-h-[160px]"
+                placeholder="请输入通知详细内容..."
+                value={formContent}
+                onChange={(e) => setFormContent(e.target.value)}
+              />
             </div>
             <div className="col-span-2">
               <label className="label">上传附件</label>

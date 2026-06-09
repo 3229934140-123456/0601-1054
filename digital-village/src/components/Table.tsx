@@ -59,7 +59,7 @@ export default function Table<T = any>({
               >
                 {columns.map((col) => (
                   <td key={col.key} className="table-td">
-                    {col.render ? col.render(row, index) : String(row[col.key] ?? '')}
+                    {col.render ? col.render(row, index) : String((row as any)[col.key] ?? '')}
                   </td>
                 ))}
               </tr>

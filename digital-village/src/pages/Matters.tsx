@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react'
-import { Search, Plus, FileText, User, Clock, ChevronRight, ClipboardList, Paperclip } from 'lucide-react'
+import { Search, Plus, FileText, User, Clock, ChevronRight, ClipboardList, Paperclip, X } from 'lucide-react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Table, { TableColumn } from '../components/Table'
 import Pagination from '../components/Pagination'
 import Modal from '../components/Modal'
 import ProgressTimeline from '../components/ProgressTimeline'
-import { matters, villageGroups } from '../data/mockData'
-import type { Matter, MatterStatus, MatterType } from '../types'
+import { useStore } from '../store/StoreContext'
+import { villageGroups } from '../data/mockData'
+import type { Matter, MatterStatus, MatterType, MatterProgress } from '../types'
 
 const matterStatusColors: Record<MatterStatus, string> = {
   '待受理': 'warning',
@@ -21,6 +22,7 @@ const matterStatusColors: Record<MatterStatus, string> = {
 const matterTypeList: MatterType[] = ['低保申请', '宅基地审批', '证明开具', '土地流转', '医保办理', '养老认证', '矛盾调解']
 
 export default function Matters() {
+  const { matters, addMatter, updateMatterStatus } = useStore()
   const [searchText, setSearchText] = useState('')
   const [selectedType, setSelectedType] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
@@ -29,6 +31,27 @@ export default function Matters() {
   const [selectedMatter, setSelectedMatter] = useState<Matter | null>(null)
   const [showRegister, setShowRegister] = useState(false)
   const pageSize = 10
+
+  const [formType, setFormType] = useState<MatterType | ''>('')
+  const [formApplicant, setFormApplicant] = useState('')
+  const [formPhone, setFormPhone] = useState('')
+  const [formGroupId, setFormGroupId] = useState('')
+  const [formExpectedDate, setFormExpectedDate] = useState('')
+  const [formHandler, setFormHandler] = useState('李明')
+  const [formDescription, setFormDescription] = useState('')
+  const [formMaterials, setFormMaterials] = useState<string[]>([])
+  const [materialInput, setMaterialInput] = useState('')
+
+  const formatNow = () => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  }
+  const formatNowWithTime = () => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
+  }
 
   const filteredMatters = useMemo(() => {
     return matters.filter(m => {
@@ -40,7 +63,7 @@ export default function Matters() {
       if (selectedGroup && m.groupId !== selectedGroup) return false
       return true
     })
-  }, [searchText, selectedType, selectedStatus, selectedGroup])
+  }, [matters, searchText, selectedType, selectedStatus, selectedGroup])
 
   const paginatedMatters = useMemo(() => {
     const start = (currentPage - 1) * pageSize
@@ -54,21 +77,112 @@ export default function Matters() {
       passed: matters.filter(m => ['已通过', '已办结'].includes(m.status)).length,
       rejected: matters.filter(m => m.status === '已驳回').length,
     }
-  }, [])
+  }, [matters])
 
   const getTimelineSteps = (matter: Matter) => {
-    const statusOrder: MatterStatus[] = ['待受理', '审核中', '待补充材料', '已通过', '已驳回', '已办结']
-    const currentIndex = statusOrder.indexOf(matter.status)
-    return matter.progress.map((p) => {
-      const idx = statusOrder.indexOf(p.status)
+    return matter.progress.map((p, i) => {
+      const isLast = i === matter.progress.length - 1
       return {
         label: p.status,
         time: p.time,
         operator: p.operator,
         remark: p.remark,
-        status: idx < currentIndex ? 'completed' as const : idx === currentIndex ? 'current' as const : 'pending' as const,
+        status: isLast ? 'current' as const : 'completed' as const,
       }
     })
+  }
+
+  const liveMatter = useMemo(() => {
+    if (!selectedMatter) return null
+    return matters.find(m => m.id === selectedMatter.id) || selectedMatter
+  }, [selectedMatter, matters])
+
+  const handleSubmitRegister = () => {
+    if (!formType || !formApplicant || !formGroupId || !formDescription) {
+      alert('请填写必填项')
+      return
+    }
+    const group = villageGroups.find(g => g.id === formGroupId)
+    const newMatter: Matter = {
+      id: `m${Date.now()}`,
+      matterNo: `SZ${formatNow().replace(/-/g, '')}${String(matters.length + 1).padStart(3, '0')}`,
+      type: formType,
+      applicant: formApplicant,
+      householdId: '',
+      phone: formPhone,
+      groupId: formGroupId,
+      groupName: group?.name || '',
+      submitDate: formatNow(),
+      status: '待受理',
+      handler: formHandler || '李明',
+      expectedDate: formExpectedDate || formatNow(),
+      description: formDescription,
+      materials: formMaterials,
+      progress: [
+        {
+          id: `p${Date.now()}`,
+          status: '待受理',
+          operator: '系统',
+          remark: '申请已提交，等待受理',
+          time: formatNowWithTime(),
+        } as MatterProgress,
+      ],
+    }
+    addMatter(newMatter)
+    resetForm()
+    setShowRegister(false)
+    setCurrentPage(1)
+  }
+
+  const resetForm = () => {
+    setFormType('')
+    setFormApplicant('')
+    setFormPhone('')
+    setFormGroupId('')
+    setFormExpectedDate('')
+    setFormHandler('李明')
+    setFormDescription('')
+    setFormMaterials([])
+    setMaterialInput('')
+  }
+
+  const addMaterial = () => {
+    if (materialInput.trim()) {
+      setFormMaterials([...formMaterials, materialInput.trim()])
+      setMaterialInput('')
+    }
+  }
+
+  const removeMaterial = (idx: number) => {
+    setFormMaterials(formMaterials.filter((_, i) => i !== idx))
+  }
+
+  const handleAdvance = () => {
+    if (!liveMatter) return
+    const nextStatus: Record<string, MatterStatus> = {
+      '待受理': '审核中',
+      '审核中': '已通过',
+      '待补充材料': '审核中',
+    }
+    const target = nextStatus[liveMatter.status]
+    if (target) {
+      updateMatterStatus(liveMatter.id, target, `已推进到「${target}」状态`)
+    } else if (liveMatter.status === '已通过') {
+      updateMatterStatus(liveMatter.id, '已办结', '事项已办结归档')
+    }
+  }
+
+  const handleSupplement = () => {
+    if (!liveMatter) return
+    updateMatterStatus(liveMatter.id, '待补充材料', '请申请人补充相关材料')
+  }
+
+  const handleReject = () => {
+    if (!liveMatter) return
+    const reason = prompt('请输入驳回原因：')
+    if (reason !== null) {
+      updateMatterStatus(liveMatter.id, '已驳回', reason || '申请不符合条件，予以驳回')
+    }
   }
 
   const columns: TableColumn<Matter>[] = [
@@ -97,16 +211,8 @@ export default function Matters() {
         </div>
       ),
     },
-    {
-      key: 'groupName',
-      title: '村组',
-      width: '120px',
-    },
-    {
-      key: 'submitDate',
-      title: '申请日期',
-      width: '110px',
-    },
+    { key: 'groupName', title: '村组', width: '120px' },
+    { key: 'submitDate', title: '申请日期', width: '110px' },
     {
       key: 'expectedDate',
       title: '预计办结',
@@ -121,11 +227,7 @@ export default function Matters() {
         )
       },
     },
-    {
-      key: 'handler',
-      title: '经办人',
-      width: '80px',
-    },
+    { key: 'handler', title: '经办人', width: '80px' },
     {
       key: 'status',
       title: '状态',
@@ -138,10 +240,7 @@ export default function Matters() {
       width: '100px',
       render: (row) => (
         <button
-          onClick={(e) => {
-            e.stopPropagation()
-            setSelectedMatter(row)
-          }}
+          onClick={(e) => { e.stopPropagation(); setSelectedMatter(row) }}
           className="text-primary-600 hover:text-primary-700 font-medium text-sm inline-flex items-center gap-1"
         >
           查看 <ChevronRight className="w-4 h-4" />
@@ -219,22 +318,14 @@ export default function Matters() {
           </div>
           <div className="min-w-[150px]">
             <label className="label">事项类型</label>
-            <select
-              value={selectedType}
-              onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1) }}
-              className="select"
-            >
+            <select value={selectedType} onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1) }} className="select">
               <option value="">全部类型</option>
               {matterTypeList.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="min-w-[130px]">
             <label className="label">办理状态</label>
-            <select
-              value={selectedStatus}
-              onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1) }}
-              className="select"
-            >
+            <select value={selectedStatus} onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1) }} className="select">
               <option value="">全部状态</option>
               <option value="待受理">待受理</option>
               <option value="审核中">审核中</option>
@@ -246,11 +337,7 @@ export default function Matters() {
           </div>
           <div className="min-w-[160px]">
             <label className="label">所属村组</label>
-            <select
-              value={selectedGroup}
-              onChange={(e) => { setSelectedGroup(e.target.value); setCurrentPage(1) }}
-              className="select"
-            >
+            <select value={selectedGroup} onChange={(e) => { setSelectedGroup(e.target.value); setCurrentPage(1) }} className="select">
               <option value="">全部村组</option>
               {villageGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
@@ -266,92 +353,72 @@ export default function Matters() {
 
       <Card className="overflow-hidden">
         <div className="p-0">
-          <Table
-            columns={columns}
-            data={paginatedMatters}
-            rowKey={(r) => r.id}
-            onRowClick={(row) => setSelectedMatter(row)}
-          />
-          <Pagination
-            current={currentPage}
-            total={filteredMatters.length}
-            pageSize={pageSize}
-            onChange={setCurrentPage}
-          />
+          <Table columns={columns as any} data={paginatedMatters as any} rowKey={(r: any) => r.id} onRowClick={(row) => setSelectedMatter(row as Matter)} />
+          <Pagination current={currentPage} total={filteredMatters.length} pageSize={pageSize} onChange={setCurrentPage} />
         </div>
       </Card>
 
       <Modal
-        open={!!selectedMatter}
+        open={!!liveMatter}
         onClose={() => setSelectedMatter(null)}
-        title={selectedMatter ? `事项详情 - ${selectedMatter.matterNo}` : ''}
+        title={liveMatter ? `事项详情 - ${liveMatter.matterNo}` : ''}
         width="max-w-3xl"
       >
-        {selectedMatter && (
+        {liveMatter && (
           <div className="space-y-6">
             <div className="bg-gray-50 rounded-xl p-5">
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-lg font-bold text-gray-900">{selectedMatter.type}</h3>
-                    <Badge variant={matterStatusColors[selectedMatter.status] as any} size="md">
-                      {selectedMatter.status}
+                    <h3 className="text-lg font-bold text-gray-900">{liveMatter.type}</h3>
+                    <Badge variant={matterStatusColors[liveMatter.status] as any} size="md">
+                      {liveMatter.status}
                     </Badge>
                   </div>
                   <p className="text-sm text-gray-500">
-                    申请编号: {selectedMatter.matterNo} · 申请日期: {selectedMatter.submitDate}
+                    申请编号: {liveMatter.matterNo} · 申请日期: {liveMatter.submitDate}
                   </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-500">申请人</span>
-                  <p className="font-medium text-gray-900 mt-0.5">{selectedMatter.applicant}</p>
-                </div>
-                <div>
-                  <span className="text-gray-500">联系电话</span>
-                  <p className="font-medium text-gray-900 mt-0.5">{selectedMatter.phone}</p>
-                </div>
-                <div>
-                  <span className="text-gray-500">所属村组</span>
-                  <p className="font-medium text-gray-900 mt-0.5">{selectedMatter.groupName}</p>
-                </div>
-                <div>
-                  <span className="text-gray-500">经办人</span>
-                  <p className="font-medium text-gray-900 mt-0.5">{selectedMatter.handler}</p>
-                </div>
+                <div><span className="text-gray-500">申请人</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.applicant}</p></div>
+                <div><span className="text-gray-500">联系电话</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.phone}</p></div>
+                <div><span className="text-gray-500">所属村组</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.groupName}</p></div>
+                <div><span className="text-gray-500">经办人</span><p className="font-medium text-gray-900 mt-0.5">{liveMatter.handler}</p></div>
               </div>
             </div>
 
             <div>
               <h4 className="font-semibold text-gray-900 mb-2">申请说明</h4>
-              <p className="text-gray-700 bg-gray-50 rounded-lg p-4 text-sm leading-relaxed">
-                {selectedMatter.description}
-              </p>
+              <p className="text-gray-700 bg-gray-50 rounded-lg p-4 text-sm leading-relaxed">{liveMatter.description}</p>
             </div>
 
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-3">提交材料</h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {selectedMatter.materials.map((m, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
-                    <Paperclip className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-700">{m}</span>
-                  </div>
-                ))}
+            {liveMatter.materials.length > 0 && (
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-3">提交材料</h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {liveMatter.materials.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                      <Paperclip className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm text-gray-700">{m}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
               <h4 className="font-semibold text-gray-900 mb-4">办理进度</h4>
-              <ProgressTimeline steps={getTimelineSteps(selectedMatter)} />
+              <ProgressTimeline steps={getTimelineSteps(liveMatter)} />
             </div>
 
-            {['待受理', '审核中', '待补充材料'].includes(selectedMatter.status) && (
+            {['待受理', '审核中', '待补充材料', '已通过'].includes(liveMatter.status) && (
               <div className="flex gap-3 pt-4 border-t border-gray-200">
-                <button className="btn-primary">推进办理</button>
-                <button className="btn-outline">补充材料</button>
-                <button className="btn-danger">驳回申请</button>
+                <button onClick={handleAdvance} className="btn-primary">
+                  {liveMatter.status === '已通过' ? '办结归档' : '推进办理'}
+                </button>
+                <button onClick={handleSupplement} className="btn-outline">补充材料</button>
+                <button onClick={handleReject} className="btn-danger">驳回申请</button>
               </div>
             )}
           </div>
@@ -360,12 +427,12 @@ export default function Matters() {
 
       <Modal
         open={showRegister}
-        onClose={() => setShowRegister(false)}
+        onClose={() => { setShowRegister(false); resetForm() }}
         title="登记事项"
         footer={
           <>
-            <button onClick={() => setShowRegister(false)} className="btn-outline">取消</button>
-            <button onClick={() => setShowRegister(false)} className="btn-primary">提交登记</button>
+            <button onClick={() => { setShowRegister(false); resetForm() }} className="btn-outline">取消</button>
+            <button onClick={handleSubmitRegister} className="btn-primary">提交登记</button>
           </>
         }
       >
@@ -373,45 +440,64 @@ export default function Matters() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">事项类型 <span className="text-red-500">*</span></label>
-              <select className="select">
+              <select value={formType} onChange={(e) => setFormType(e.target.value as MatterType)} className="select">
                 <option value="">请选择类型</option>
                 {matterTypeList.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
             <div>
               <label className="label">申请人 <span className="text-red-500">*</span></label>
-              <input type="text" className="input" placeholder="请输入申请人姓名" />
+              <input type="text" value={formApplicant} onChange={(e) => setFormApplicant(e.target.value)} className="input" placeholder="请输入申请人姓名" />
             </div>
             <div>
               <label className="label">联系电话</label>
-              <input type="text" className="input" placeholder="请输入联系电话" />
+              <input type="text" value={formPhone} onChange={(e) => setFormPhone(e.target.value)} className="input" placeholder="请输入联系电话" />
             </div>
             <div>
               <label className="label">所属村组 <span className="text-red-500">*</span></label>
-              <select className="select">
+              <select value={formGroupId} onChange={(e) => setFormGroupId(e.target.value)} className="select">
                 <option value="">请选择村组</option>
                 {villageGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </div>
             <div>
               <label className="label">预计办结日期</label>
-              <input type="date" className="input" />
+              <input type="date" value={formExpectedDate} onChange={(e) => setFormExpectedDate(e.target.value)} className="input" />
             </div>
             <div>
               <label className="label">经办人</label>
-              <input type="text" className="input" placeholder="请输入经办人姓名" />
+              <input type="text" value={formHandler} onChange={(e) => setFormHandler(e.target.value)} className="input" placeholder="请输入经办人姓名" />
             </div>
           </div>
           <div>
             <label className="label">申请说明 <span className="text-red-500">*</span></label>
-            <textarea className="input min-h-[100px]" placeholder="请输入事项说明" />
+            <textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="input min-h-[100px]" placeholder="请输入事项说明" />
           </div>
           <div>
-            <label className="label">上传材料</label>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary-400 transition-colors cursor-pointer">
-              <Paperclip className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-              <p className="text-sm text-gray-500">点击或拖拽文件到此处上传</p>
+            <label className="label">材料清单</label>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={materialInput}
+                onChange={(e) => setMaterialInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addMaterial())}
+                className="input flex-1"
+                placeholder="输入材料名称后按回车添加"
+              />
+              <button type="button" onClick={addMaterial} className="btn-secondary">添加</button>
             </div>
+            {formMaterials.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {formMaterials.map((m, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 bg-gray-100 rounded-lg px-3 py-1.5 text-sm">
+                    {m}
+                    <button type="button" onClick={() => removeMaterial(i)} className="text-gray-500 hover:text-red-500">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </Modal>
